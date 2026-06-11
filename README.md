@@ -1,10 +1,14 @@
-# Testy smoke klastra HashiCorp Vault
+# <img src=".gitlab/playwright.png" alt="playwright" height="30"/> Testy e2e klastra HashiCorp Vault
+
+::include{file=.gitlab/badges.md}
 
 Ten projekt sprawdza, czy deployment trzywęzłowego klastra Vault zakończył się
 poprawnie i czy klaster jest gotowy do obsługi klientów.
 
-Testy są bezpieczne: wykonują wyłącznie żądania odczytowe i nie wymagają tokenu
-Vault. Nie zapisują ani nie usuwają sekretów.
+Testy wykonują wyłącznie operacje odczytu. Testy API i dostępności UI nie
+wymagają uwierzytelnienia. Test odczytu sekretu loguje się do Vault metodą
+userpass przy użyciu `VAULT_USERNAME` i `VAULT_PASSWORD`. Testy nie zapisują ani
+nie usuwają sekretów.
 
 ## Co jest sprawdzane?
 
@@ -14,7 +18,8 @@ Vault. Nie zapisują ani nie usuwają sekretów.
 | Certyfikat TLS | Sprawdza, czy certyfikat publicznego endpointu jest zaufany przez magazyn CA środowiska testowego, i zapisuje jego wystawcę, okres ważności oraz błąd walidacji. | Pozwala wykryć brak CA, niepoprawny łańcuch certyfikatów, niezgodną nazwę hosta lub nieważny certyfikat. |
 | Lider klastra HA | Odpytuje `/v1/sys/leader` i sprawdza, czy tryb HA jest włączony oraz czy Vault wskazuje adres lidera. | Klaster bez lidera nie może poprawnie obsługiwać operacji zapisu. |
 | Trzy nody RAFT | Odpytuje bezpośrednio nody `vault-1005`, `vault-1006` i `vault-1007`. Sprawdza, czy wszystkie są zainicjalizowane i odpieczętowane oraz czy istnieje dokładnie jeden node active i dwa nody standby. | Potwierdza, że cały klaster działa, a nie tylko publiczny endpoint. |
-| Interfejs WWW | Otwiera `https://vault.rachuna.dev/ui/` w Chromium i sprawdza odpowiedź HTTP, tytuł strony oraz widoczność interfejsu. | Potwierdza działanie pełnej ścieżki: klient -> VIP -> HAProxy -> Vault UI. |
+| Interfejs WWW | Otwiera `https://vault.rachuna.dev/ui/` w Chromium i sprawdza odpowiedź HTTP, przekierowanie do logowania oraz widoczność formularza. | Potwierdza działanie pełnej ścieżki: klient -> VIP -> HAProxy -> Vault UI. |
+| Odczyt sekretu z UI | Loguje się metodą userpass, otwiera `dev.rachuna/e2e-test` i sprawdza wartość `{ "TestKey": "TestValue" }`. | Potwierdza działanie uwierzytelnienia, uprawnień użytkownika oraz silnika KV. |
 
 Test nodów sprawdza dodatkowo, czy wszystkie trzy instancje zwracają ten sam:
 
@@ -49,7 +54,14 @@ sprawdzają stan każdej instancji Vault niezależnie od load balancera.
 
 ## Uruchomienie
 
-W devcontainerze wykonaj:
+Test UI odczytujący sekret wymaga danych logowania. W devcontainerze ustaw:
+
+```bash
+export VAULT_USERNAME='<username>'
+export VAULT_PASSWORD='<password>'
+```
+
+Następnie uruchom cały zestaw:
 
 ```bash
 npm test
@@ -58,7 +70,7 @@ npm test
 Poprawny wynik wygląda następująco:
 
 ```text
-5 passed
+6 passed
 ```
 
 Można uruchomić tylko wybraną grupę:
@@ -68,8 +80,9 @@ npm run test:api
 npm run test:ui
 ```
 
-- `test:api` uruchamia cztery testy API i TLS Vault.
-- `test:ui` uruchamia test interfejsu WWW w Chromium.
+- `test:api` uruchamia cztery testy API i TLS Vault; nie wymaga danych logowania.
+- `test:ui` uruchamia dwa testy interfejsu WWW w Chromium; wymaga
+  `VAULT_USERNAME` i `VAULT_PASSWORD`.
 
 ## Pierwsze przygotowanie środowiska
 
@@ -96,16 +109,20 @@ Po wykonaniu testów Playwright zapisuje:
 
 - raport HTML w `playwright-report/index.html`,
 - raport JSON w `playwright-report/results.json`,
+- raport JUnit XML w `playwright-report/junit.xml`,
 - diagnostykę nieudanych testów w `test-results/`,
 - odpowiedzi API Vault jako załączniki JSON,
 - wynik walidacji certyfikatu w załączniku `tls-certificate.json`,
-- zrzut ekranu interfejsu Vault.
+- zrzuty ekranu formularza logowania i odczytanego sekretu.
 
 Raport HTML można otworzyć poleceniem:
 
 ```bash
 npm run report
 ```
+
+Ścieżkę raportu JUnit można nadpisać w CI zmienną
+`PLAYWRIGHT_JUNIT_OUTPUT_FILE`.
 
 ## Jak interpretować błędy?
 
@@ -141,9 +158,15 @@ redundancji. Szczegóły niedostępnych adresów znajdują się w załączniku
 API może działać, ale problem może dotyczyć HAProxy, routingu SNI, zasobów UI
 albo przeglądarki zainstalowanej w devcontainerze.
 
+### Logowanie lub odczyt sekretu nie działa
+
+Sprawdź, czy `VAULT_USERNAME` i `VAULT_PASSWORD` są ustawione oraz czy użytkownik
+może zalogować się metodą userpass i odczytać sekret `dev.rachuna/e2e-test`.
+Test oczekuje wartości `{ "TestKey": "TestValue" }`.
+
 ## Konfiguracja
 
-Domyślnie testy używają:
+Domyślna konfiguracja adresów i TLS:
 
 ```text
 VAULT_ADDR=https://vault.rachuna.dev
@@ -151,15 +174,23 @@ VAULT_NODE_URLS=https://vault-1005.rachuna.dev:8200,https://vault-1006.rachuna.d
 VAULT_TLS_SKIP_VERIFY=true
 ```
 
+Projekt UI wymaga dodatkowo ustawienia `VAULT_USERNAME` i `VAULT_PASSWORD`.
+
 Wartości można nadpisać podczas uruchomienia:
 
 ```bash
 VAULT_ADDR=https://vault.example.com \
 VAULT_NODE_URLS=https://vault-1.example.com:8200,https://vault-2.example.com:8200,https://vault-3.example.com:8200 \
 VAULT_TLS_SKIP_VERIFY=false \
+VAULT_USERNAME='<username>' \
+VAULT_PASSWORD='<password>' \
 npm test
 ```
 
 `VAULT_TLS_SKIP_VERIFY=true` jest wartością domyślną, ponieważ środowisko
 korzysta z wewnętrznego PKI. Ustaw `false`, jeśli CA klastra jest zaufane
 przez devcontainer.
+
+---
+
+::include{file=.gitlab/footer.md}

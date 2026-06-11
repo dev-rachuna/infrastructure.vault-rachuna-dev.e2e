@@ -15,6 +15,7 @@ export default defineConfig({
     ['list'],
     ['html', { outputFolder: 'playwright-report', open: 'never' }],
     ['json', { outputFile: 'playwright-report/results.json' }],
+    ['junit', { outputFile: 'playwright-report/junit.xml' }],
   ],
   use: {
     baseURL: vaultAddress,
