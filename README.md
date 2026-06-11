@@ -1,93 +1,196 @@
-# e2e
+# <img src=".gitlab/playwright.png" alt="playwright" height="30"/> Testy e2e klastra HashiCorp Vault
 
-Testy integracyjne e2e w playwright
+::include{file=.gitlab/badges.md}
 
-## Getting started
+Ten projekt sprawdza, czy deployment trzywęzłowego klastra Vault zakończył się
+poprawnie i czy klaster jest gotowy do obsługi klientów.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+Testy wykonują wyłącznie operacje odczytu. Testy API i dostępności UI nie
+wymagają uwierzytelnienia. Test odczytu sekretu loguje się do Vault metodą
+userpass przy użyciu `VAULT_USERNAME` i `VAULT_PASSWORD`. Testy nie zapisują ani
+nie usuwają sekretów.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## Co jest sprawdzane?
 
-## Add your files
+| Test | Co sprawdza? | Dlaczego jest ważny? |
+|---|---|---|
+| Publiczny endpoint Vault | Odpytuje `https://vault.rachuna.dev/v1/sys/health` i potwierdza, że Vault jest zainicjalizowany, odpieczętowany i że publiczny adres prowadzi do aktywnego noda. | Klienci muszą mieć dostęp do działającego lidera przez główny adres usługi. |
+| Certyfikat TLS | Sprawdza, czy certyfikat publicznego endpointu jest zaufany przez magazyn CA środowiska testowego, i zapisuje jego wystawcę, okres ważności oraz błąd walidacji. | Pozwala wykryć brak CA, niepoprawny łańcuch certyfikatów, niezgodną nazwę hosta lub nieważny certyfikat. |
+| Lider klastra HA | Odpytuje `/v1/sys/leader` i sprawdza, czy tryb HA jest włączony oraz czy Vault wskazuje adres lidera. | Klaster bez lidera nie może poprawnie obsługiwać operacji zapisu. |
+| Trzy nody RAFT | Odpytuje bezpośrednio nody `vault-1005`, `vault-1006` i `vault-1007`. Sprawdza, czy wszystkie są zainicjalizowane i odpieczętowane oraz czy istnieje dokładnie jeden node active i dwa nody standby. | Potwierdza, że cały klaster działa, a nie tylko publiczny endpoint. |
+| Interfejs WWW | Otwiera `https://vault.rachuna.dev/ui/` w Chromium i sprawdza odpowiedź HTTP, przekierowanie do logowania oraz widoczność formularza. | Potwierdza działanie pełnej ścieżki: klient -> VIP -> HAProxy -> Vault UI. |
+| Odczyt sekretu z UI | Loguje się metodą userpass, otwiera `dev.rachuna/e2e-test` i sprawdza wartość `{ "TestKey": "TestValue" }`. | Potwierdza działanie uwierzytelnienia, uprawnień użytkownika oraz silnika KV. |
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+Test nodów sprawdza dodatkowo, czy wszystkie trzy instancje zwracają ten sam:
 
+- identyfikator klastra,
+- nazwę klastra,
+- numer wersji Vault.
+
+Dzięki temu wykrywamy sytuację, w której działający serwer nie należy do
+oczekiwanego klastra albo ma inną wersję oprogramowania.
+
+## Sprawdzana architektura
+
+```text
+                              +--------------------+
+                              | vault.rachuna.dev  |
+                              | VIP: 10.3.2.254    |
+                              +---------+----------+
+                                        |
+                                     HAProxy
+                                        |
+                    +-------------------+-------------------+
+                    |                   |                   |
+          vault-1005.rachuna.dev  vault-1006.rachuna.dev  vault-1007.rachuna.dev
+              10.3.2.5:8200         10.3.2.6:8200         10.3.2.7:8200
+                    |                   |                   |
+                    +------------- Vault RAFT HA -----------+
+                              1 active + 2 standby
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/dev.rachuna/infrastructure/vault-rachuna-dev/e2e.git
-git branch -M main
-git push -uf origin main
+
+Adres publiczny sprawdza działanie VIP i HAProxy. Bezpośrednie adresy nodów
+sprawdzają stan każdej instancji Vault niezależnie od load balancera.
+
+## Uruchomienie
+
+Test UI odczytujący sekret wymaga danych logowania. W devcontainerze ustaw:
+
+```bash
+export VAULT_USERNAME='<username>'
+export VAULT_PASSWORD='<password>'
 ```
 
-## Integrate with your tools
+Następnie uruchom cały zestaw:
 
-* [Set up project integrations](https://gitlab.com/dev.rachuna/infrastructure/vault-rachuna-dev/e2e/-/settings/integrations)
+```bash
+npm test
+```
 
-## Collaborate with your team
+Poprawny wynik wygląda następująco:
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+```text
+6 passed
+```
 
-## Test and Deploy
+Można uruchomić tylko wybraną grupę:
 
-Use the built-in continuous integration in GitLab.
+```bash
+npm run test:api
+npm run test:ui
+```
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+- `test:api` uruchamia cztery testy API i TLS Vault; nie wymaga danych logowania.
+- `test:ui` uruchamia dwa testy interfejsu WWW w Chromium; wymaga
+  `VAULT_USERNAME` i `VAULT_PASSWORD`.
 
-***
+## Pierwsze przygotowanie środowiska
 
-# Editing this README
+Po utworzeniu nowego devcontainera zainstaluj zależności projektu:
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+```bash
+npm ci
+```
 
-## Suggestions for a good README
+Playwright 1.60 nie rozpoznaje jeszcze Ubuntu 26.04. Dlatego Chromium i jego
+biblioteki należy zainstalować przy użyciu kompatybilnego artefaktu Ubuntu
+24.04:
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+```bash
+PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64 npx playwright install chromium
+PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64 npx playwright install-deps chromium
+```
 
-## Name
-Choose a self-explaining name for your project.
+Te polecenia są potrzebne tylko podczas przygotowania nowego devcontainera.
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+## Raport
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+Po wykonaniu testów Playwright zapisuje:
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+- raport HTML w `playwright-report/index.html`,
+- raport JSON w `playwright-report/results.json`,
+- raport JUnit XML w `playwright-report/junit.xml`,
+- diagnostykę nieudanych testów w `test-results/`,
+- odpowiedzi API Vault jako załączniki JSON,
+- wynik walidacji certyfikatu w załączniku `tls-certificate.json`,
+- zrzuty ekranu formularza logowania i odczytanego sekretu.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+Raport HTML można otworzyć poleceniem:
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+```bash
+npm run report
+```
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+Ścieżkę raportu JUnit można nadpisać w CI zmienną
+`PLAYWRIGHT_JUNIT_OUTPUT_FILE`.
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+## Jak interpretować błędy?
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+### Publiczny endpoint nie odpowiada
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+Prawdopodobny problem dotyczy DNS, VIP Keepalived, HAProxy, certyfikatu TLS albo
+samej usługi Vault.
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### Vault jest sealed lub uninitialized
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+Deployment uruchomił proces Vault, ale bootstrap albo auto-unseal nie zakończył
+się poprawnie.
 
-## License
-For open source projects, say how it is licensed.
+### Certyfikat TLS nie jest zaufany
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Załącznik `tls-certificate.json` zawiera pole `authorizationError` z przyczyną,
+na przykład brak zaufanego CA, wygasły certyfikat albo niezgodność nazwy hosta.
+Ten test zawsze weryfikuje certyfikat, również gdy `VAULT_TLS_SKIP_VERIFY=true`.
+
+### Brak lidera HA
+
+Nody nie utworzyły poprawnego klastra RAFT albo nie mogą się ze sobą
+komunikować.
+
+### Jeden z nodów jest niedostępny
+
+Publiczny endpoint może nadal działać, ale klaster nie ma oczekiwanej
+redundancji. Szczegóły niedostępnych adresów znajdują się w załączniku
+`unavailable-nodes.json`.
+
+### Test UI nie przechodzi
+
+API może działać, ale problem może dotyczyć HAProxy, routingu SNI, zasobów UI
+albo przeglądarki zainstalowanej w devcontainerze.
+
+### Logowanie lub odczyt sekretu nie działa
+
+Sprawdź, czy `VAULT_USERNAME` i `VAULT_PASSWORD` są ustawione oraz czy użytkownik
+może zalogować się metodą userpass i odczytać sekret `dev.rachuna/e2e-test`.
+Test oczekuje wartości `{ "TestKey": "TestValue" }`.
+
+## Konfiguracja
+
+Domyślna konfiguracja adresów i TLS:
+
+```text
+VAULT_ADDR=https://vault.rachuna.dev
+VAULT_NODE_URLS=https://vault-1005.rachuna.dev:8200,https://vault-1006.rachuna.dev:8200,https://vault-1007.rachuna.dev:8200
+VAULT_TLS_SKIP_VERIFY=true
+```
+
+Projekt UI wymaga dodatkowo ustawienia `VAULT_USERNAME` i `VAULT_PASSWORD`.
+
+Wartości można nadpisać podczas uruchomienia:
+
+```bash
+VAULT_ADDR=https://vault.example.com \
+VAULT_NODE_URLS=https://vault-1.example.com:8200,https://vault-2.example.com:8200,https://vault-3.example.com:8200 \
+VAULT_TLS_SKIP_VERIFY=false \
+VAULT_USERNAME='<username>' \
+VAULT_PASSWORD='<password>' \
+npm test
+```
+
+`VAULT_TLS_SKIP_VERIFY=true` jest wartością domyślną, ponieważ środowisko
+korzysta z wewnętrznego PKI. Ustaw `false`, jeśli CA klastra jest zaufane
+przez devcontainer.
+
+---
+
+::include{file=.gitlab/footer.md}
