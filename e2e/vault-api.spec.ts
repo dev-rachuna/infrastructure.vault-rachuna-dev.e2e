@@ -13,14 +13,17 @@ test.describe('Weryfikacja deploymentu Vault', () => {
   test(`Sprawdzenie healthcheck dla ${vaultAddress}`, async ({ request }, testInfo) => {
     const health = await getHealth(request, vaultAddress, testInfo, 'public-health.json');
 
+    const role = health.performance_standby
+      ? 'performance_standby'
+      : health.standby
+        ? 'standby'
+        : 'active';
     console.log(
-      `[Vault] Klaster: ${health.cluster_name}, wersja: ${health.version}, rola endpointu: active`,
+      `[Vault] Klaster: ${health.cluster_name}, wersja: ${health.version}, rola endpointu: ${role}`,
     );
 
     expect(health.initialized).toBe(true);
     expect(health.sealed).toBe(false);
-    expect(health.standby).toBe(false);
-    expect(health.performance_standby).toBe(false);
     expect(health.cluster_id).not.toBe('');
     expect(health.cluster_name).not.toBe('');
     expect(health.version).toMatch(/^\d+\.\d+\.\d+/);

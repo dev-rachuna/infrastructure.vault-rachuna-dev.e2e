@@ -20,6 +20,17 @@ export interface VaultLeader {
   leader_cluster_address: string;
 }
 
+interface VaultKvV2Response {
+  data: {
+    data: Record<string, unknown>;
+  };
+}
+
+export interface VaultCredentials {
+  username: string;
+  password: string;
+}
+
 export interface TlsCertificateStatus {
   trusted: boolean;
   authorizationError: string | null;
@@ -32,6 +43,9 @@ export interface TlsCertificateStatus {
 }
 
 export const vaultAddress = process.env.VAULT_ADDR ?? 'https://vault.rachuna.dev';
+export const vaultCredentialsPath =
+  process.env.VAULT_CREDENTIALS_PATH ?? 'users/defaults_passwords/tech_user';
+export const vaultUsername = process.env.VAULT_USERNAME ?? 'tech_user';
 
 const defaultVaultNodeUrls = [
   'https://vault-1005.rachuna.dev:8200',
@@ -125,4 +139,40 @@ export async function getHealth(
   });
 
   return parseJson<VaultHealth>(response, testInfo, attachmentName);
+}
+
+export async function getVaultCredentials(
+  request: APIRequestContext,
+): Promise<VaultCredentials> {
+  const token = process.env.VAULT_TOKEN;
+
+  if (!token) {
+    throw new Error('VAULT_TOKEN must be set');
+  }
+
+  const [mount, ...secretPathParts] = vaultCredentialsPath.split('/');
+  const secretPath = secretPathParts.map(encodeURIComponent).join('/');
+  const response = await request.get(
+    `${vaultAddress}/v1/${encodeURIComponent(mount)}/data/${secretPath}`,
+    { headers: { 'X-Vault-Token': token } },
+  );
+
+  if (!response.ok()) {
+    throw new Error(
+      `Cannot read Vault secret ${vaultCredentialsPath}: HTTP ${response.status()} ${response.statusText()}`,
+    );
+  }
+
+  const payload = (await response.json()) as VaultKvV2Response;
+  const username = payload.data?.data?.username ?? vaultUsername;
+  const password = payload.data?.data?.password;
+
+  if (typeof username !== 'string' || !username) {
+    throw new Error(`Vault secret ${vaultCredentialsPath} must contain a non-empty username key`);
+  }
+  if (typeof password !== 'string' || !password) {
+    throw new Error(`Vault secret ${vaultCredentialsPath} must contain a non-empty password key`);
+  }
+
+  return { username, password };
 }

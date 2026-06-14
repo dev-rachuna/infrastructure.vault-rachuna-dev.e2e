@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { getVaultCredentials } from './vault';
 
 test.use({
   ignoreHTTPSErrors: true
@@ -24,15 +25,12 @@ test.describe('Weryfikacja deploymentu Vault', () => {
   });
 
 
-  test('Odczytanie sekretu z UI', async ({ page }, testInfo) => {
-    const vaultUsername = process.env.VAULT_USERNAME;
-    const vaultPassword = process.env.VAULT_PASSWORD;
-    expect(vaultUsername, 'VAULT_USERNAME must be set').toBeTruthy();
-    expect(vaultPassword, 'VAULT_PASSWORD must be set').toBeTruthy();
+  test('Odczytanie sekretu z UI', async ({ page, request }, testInfo) => {
+    const credentials = await getVaultCredentials(request);
 
     await page.goto('/ui/vault/auth');
-    await page.getByRole('textbox', { name: 'Username' }).fill(vaultUsername!);
-    await page.getByRole('textbox', { name: 'Password' }).fill(vaultPassword!);
+    await page.getByRole('textbox', { name: 'Username' }).fill(credentials.username);
+    await page.getByRole('textbox', { name: 'Password' }).fill(credentials.password);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.getByRole('cell', { name: 'kv type backend dev.rachuna/' }).click();
     await page.getByRole('link', { name: 'e2e-test Manage secret' }).click();

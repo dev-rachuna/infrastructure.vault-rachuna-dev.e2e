@@ -6,9 +6,10 @@ Ten projekt sprawdza, czy deployment trzywęzłowego klastra Vault zakończył s
 poprawnie i czy klaster jest gotowy do obsługi klientów.
 
 Testy wykonują wyłącznie operacje odczytu. Testy API i dostępności UI nie
-wymagają uwierzytelnienia. Test odczytu sekretu loguje się do Vault metodą
-userpass przy użyciu `VAULT_USERNAME` i `VAULT_PASSWORD`. Testy nie zapisują ani
-nie usuwają sekretów.
+wymagają uwierzytelnienia. Test odczytu sekretu pobiera hasło użytkownika
+`tech_user` ze ścieżki Vault `users/defaults_passwords/tech_user` przy użyciu
+`VAULT_ADDR` i `VAULT_TOKEN`, a następnie loguje się metodą userpass. Testy nie
+zapisują ani nie usuwają sekretów.
 
 ## Co jest sprawdzane?
 
@@ -54,11 +55,12 @@ sprawdzają stan każdej instancji Vault niezależnie od load balancera.
 
 ## Uruchomienie
 
-Test UI odczytujący sekret wymaga danych logowania. W devcontainerze ustaw:
+Test UI odczytujący sekret wymaga tokenu z prawem odczytu ścieżki
+`users/defaults_passwords/tech_user`. W devcontainerze ustaw:
 
 ```bash
-export VAULT_USERNAME='<username>'
-export VAULT_PASSWORD='<password>'
+export VAULT_ADDR='https://vault.rachuna.dev'
+export VAULT_TOKEN='<token>'
 ```
 
 Następnie uruchom cały zestaw:
@@ -82,7 +84,7 @@ npm run test:ui
 
 - `test:api` uruchamia cztery testy API i TLS Vault; nie wymaga danych logowania.
 - `test:ui` uruchamia dwa testy interfejsu WWW w Chromium; wymaga
-  `VAULT_USERNAME` i `VAULT_PASSWORD`.
+  `VAULT_TOKEN` z prawem odczytu sekretu z danymi logowania.
 
 ## Pierwsze przygotowanie środowiska
 
@@ -160,9 +162,10 @@ albo przeglądarki zainstalowanej w devcontainerze.
 
 ### Logowanie lub odczyt sekretu nie działa
 
-Sprawdź, czy `VAULT_USERNAME` i `VAULT_PASSWORD` są ustawione oraz czy użytkownik
-może zalogować się metodą userpass i odczytać sekret `dev.rachuna/e2e-test`.
-Test oczekuje wartości `{ "TestKey": "TestValue" }`.
+Sprawdź, czy `VAULT_ADDR` i `VAULT_TOKEN` są ustawione, token może odczytać
+`users/defaults_passwords/tech_user`, a sekret zawiera klucz `password`.
+Użytkownik `tech_user` musi móc zalogować się metodą userpass i odczytać sekret
+`dev.rachuna/e2e-test`. Test oczekuje wartości `{ "TestKey": "TestValue" }`.
 
 ## Konfiguracja
 
@@ -174,7 +177,10 @@ VAULT_NODE_URLS=https://vault-1005.rachuna.dev:8200,https://vault-1006.rachuna.d
 VAULT_TLS_SKIP_VERIFY=true
 ```
 
-Projekt UI wymaga dodatkowo ustawienia `VAULT_USERNAME` i `VAULT_PASSWORD`.
+Projekt UI wymaga dodatkowo ustawienia `VAULT_TOKEN`. Token musi mieć prawo
+odczytu ścieżki `users/data/defaults_passwords/tech_user` w silniku KV v2.
+Domyślne wartości `VAULT_USERNAME=tech_user` i
+`VAULT_CREDENTIALS_PATH=users/defaults_passwords/tech_user` można nadpisać.
 
 Wartości można nadpisać podczas uruchomienia:
 
@@ -182,8 +188,7 @@ Wartości można nadpisać podczas uruchomienia:
 VAULT_ADDR=https://vault.example.com \
 VAULT_NODE_URLS=https://vault-1.example.com:8200,https://vault-2.example.com:8200,https://vault-3.example.com:8200 \
 VAULT_TLS_SKIP_VERIFY=false \
-VAULT_USERNAME='<username>' \
-VAULT_PASSWORD='<password>' \
+VAULT_TOKEN='<token>' \
 npm test
 ```
 
